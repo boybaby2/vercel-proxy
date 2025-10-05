@@ -5,25 +5,38 @@ const app = express();
 
 app.get("/api/proxy", async (req, res) => {
   const { url } = req.query;
-  if (!url) return res.status(400).json({ error: "Missing ?url parameter" });
+  if (!url) return res.status(400).send("Missing ?url parameter");
 
   try {
     const response = await fetch(url);
-    let html = await response.text();
+    let contentType = response.headers.get("content-type") || "";
+    let body = await response.text();
 
-    // Extract the origin (e.g. https://2stepverification.page.gd)
-    const baseUrl = new URL(url).origin;
+    // Force correct content type for HTML
+    if (contentType.includes("text/html")) {
+      const baseUrl = new URL(url).origin;
 
-    // Fix relative asset links to full URLs
-    html = html.replace(/(src|href)=["'](\/[^"']*)["']/g, (match, attr, path) => {
-      return `${attr}="${baseUrl}${path}"`;
-    });
+      // Convert relative links to absolute
+      body = body.replace(/(src|href)=["'](\/[^"'>]+)["']/g, (match, attr, path) => {
+        return `${attr}="${baseUrl}${path}"`;
+      });
 
+      // Ensure everything from that domain loads
+      res.setHeader("Content-Type", "text/html; charset=utf-8");
+    } else {
+      // For CSS, JS, or images, send as-is
+      res.setHeader("Content-Type", contentType);
+    }
+
+    // Allow iframe embedding everywhere
     res.setHeader("Access-Control-Allow-Origin", "*");
-    res.send(html);
-  } catch (err) {
-    console.error("Proxy error:", err);
-    res.status(500).json({ error: err.message });
+    res.setHeader("X-Frame-Options", "ALLOWALL");
+    res.setHeader("Content-Security-Policy", "frame-ancestors *");
+
+    res.send(body);
+  } catch (error) {
+    console.error("Proxy error:", error);
+    res.status(500).send("Error fetching the page.");
   }
 });
 
