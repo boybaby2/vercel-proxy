@@ -1,6 +1,6 @@
-import express from "express";
-import fetch from "node-fetch";
-import axios from "axios"; // For PayPal proxy
+const express = require("express");
+const fetch = require("node-fetch");
+const axios = require("axios");
 
 const app = express();
 
@@ -21,13 +21,13 @@ app.get("/api/proxy", async (req, res) => {
       body = body.replace(/(src|href|action)=["']([^:"]*[^"'>])["']/g, (match, attr, path) => {
         if (path.startsWith('http')) return match;
         const absolutePath = new URL(path, baseUrl).href;
-        return `${attr}="${proxyBase + encodeURIComponent(absolutePath)}"`;
+        return `${attr}="${process.env.PROXY_BASE + encodeURIComponent(absolutePath)}"`;
       });
       body = body.replace(/<\/body>/i, `
         <script>
           document.addEventListener('DOMContentLoaded', () => {
             const baseUrl = '${baseUrl}';
-            const proxyBase = '${proxyBase}';
+            const proxyBase = '${process.env.PROXY_BASE}';
             const originalFetch = window.fetch;
             window.fetch = async (input, init) => {
               if (typeof input === 'string' && !input.startsWith('http')) {
@@ -45,7 +45,7 @@ app.get("/api/proxy", async (req, res) => {
       body = body.replace(/url\((['"]?)([^'"\)]+)\1\)/g, (match, quote, path) => {
         if (path.startsWith('http')) return match;
         const absolutePath = new URL(path, baseUrl).href;
-        return `url(${quote}${proxyBase + encodeURIComponent(absolutePath)}${quote})`;
+        return `url(${quote}${process.env.PROXY_BASE + encodeURIComponent(absolutePath)}${quote})`;
       });
       res.setHeader("Content-Type", contentType);
     }
@@ -85,6 +85,5 @@ app.get("/proxy-paypal", async (req, res) => {
   }
 });
 
-const proxyBase = "https://vercel-proxy-nnuf.onrender.com/api/proxy?url=";
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => console.log(`Proxy running on port ${PORT}`));
