@@ -1,33 +1,37 @@
-const express = require("express");
-const fetch = require("node-fetch");
-const axios = require("axios");
-
+import express from "express";
+import fetch from "node-fetch";
 const app = express();
 
-// Your existing proxy endpoint for general URLs
 app.get("/api/proxy", async (req, res) => {
   const { url } = req.query;
   if (!url) return res.status(400).send("Missing ?url parameter");
+
   try {
     console.log("Fetching URL:", url);
     const response = await fetch(url);
     console.log("Response status:", response.status);
     let contentType = response.headers.get("content-type") || "";
     let body = await response.text();
+
     const baseUrl = new URL(url).origin;
     console.log("Base URL:", baseUrl);
+
     // Rewrite HTML, CSS, and JS
     if (contentType.includes("text/html")) {
+      // Rewrite src/href/action attributes
       body = body.replace(/(src|href|action)=["']([^:"]*[^"'>])["']/g, (match, attr, path) => {
-        if (path.startsWith('http')) return match;
+        if (path.startsWith('http')) return match; // Skip absolute URLs
         const absolutePath = new URL(path, baseUrl).href;
-        return `${attr}="${process.env.PROXY_BASE + encodeURIComponent(absolutePath)}"`;
+        return `${attr}="${proxyBase + encodeURIComponent(absolutePath)}"`;
       });
+
+      // Inject script to handle dynamic content
       body = body.replace(/<\/body>/i, `
         <script>
           document.addEventListener('DOMContentLoaded', () => {
             const baseUrl = '${baseUrl}';
-            const proxyBase = '${process.env.PROXY_BASE}';
+            const proxyBase = '${proxyBase}';
+            // Override fetch to proxy relative URLs
             const originalFetch = window.fetch;
             window.fetch = async (input, init) => {
               if (typeof input === 'string' && !input.startsWith('http')) {
@@ -39,19 +43,24 @@ app.get("/api/proxy", async (req, res) => {
         </script>
         </body>
       `);
+
       res.setHeader("Content-Type", "text/html; charset=utf-8");
     }
+    // Rewrite CSS/JS files
     else if (contentType.includes("text/css") || contentType.includes("application/javascript")) {
       body = body.replace(/url\((['"]?)([^'"\)]+)\1\)/g, (match, quote, path) => {
         if (path.startsWith('http')) return match;
         const absolutePath = new URL(path, baseUrl).href;
-        return `url(${quote}${process.env.PROXY_BASE + encodeURIComponent(absolutePath)}${quote})`;
+        return `url(${quote}${proxyBase + encodeURIComponent(absolutePath)}${quote})`;
       });
       res.setHeader("Content-Type", contentType);
     }
+    // Serve other content as-is
     else {
       res.setHeader("Content-Type", contentType);
     }
+
+    // Allow embedding and CORS
     res.setHeader("Access-Control-Allow-Origin", "*");
     res.setHeader("Content-Security-Policy", "frame-ancestors *");
     res.send(body);
@@ -61,29 +70,7 @@ app.get("/api/proxy", async (req, res) => {
   }
 });
 
-// New endpoint for PayPal proxy
-app.get("/proxy-paypal", async (req, res) => {
-  try {
-    const response = await axios.get('https://www.paypal.com/signin', {
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
-      },
-      withCredentials: true,
-    });
-    // Extract cookies from the response headers
-    const cookies = response.headers['set-cookie'] || [];
-    res.json({
-      success: true,
-      cookies: cookies,
-    });
-  } catch (error) {
-    console.error('Error fetching PayPal:', error.message);
-    res.status(500).json({
-      success: false,
-      error: 'Failed to fetch PayPal',
-    });
-  }
-});
-
+const proxyBase = "https://vercel-proxy-nnuf.onrender.com/api/proxy?url=";
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => console.log(`Proxy running on port ${PORT}`));
+    
